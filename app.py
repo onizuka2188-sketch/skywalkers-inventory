@@ -17,6 +17,7 @@ DB_FILENAME = "skywalkers_data.db"
 
 # 폴더 생성 확인
 if not os.path.exists("item_images"): os.makedirs("item_images")
+if not os.path.exists("profile_images"): os.makedirs("profile_images")
 
 # --- 페이지 설정 ---
 st.set_page_config(
@@ -122,10 +123,9 @@ def get_dataframe(query, params=()):
 def image_to_base64(image_file):
     if image_file is not None:
         try:
-            # 이미지를 리사이즈하여 저장 (용량 최적화)
             img = Image.open(image_file)
             img = img.convert('RGB')
-            img.thumbnail((300, 300)) # 썸네일 크기
+            img.thumbnail((300, 300)) 
             buffered = BytesIO()
             img.save(buffered, format="JPEG")
             return base64.b64encode(buffered.getvalue()).decode()
@@ -221,7 +221,6 @@ def page_inbound():
         if i_name:
             img_path = ""
             if i_img:
-                # 이미지 파일을 Base64 문자열로 변환하여 저장 (서버 호환성)
                 img_path = image_to_base64(i_img)
             
             exist = run_query("SELECT id, quantity FROM inventory WHERE item_name=? AND size=? AND category=?", (i_name, i_size, i_cat))
@@ -234,7 +233,7 @@ def page_inbound():
             st.success(f"✅ {i_name} ({i_size}) {i_qty}개 입고 완료!")
         else: st.error("품명을 입력해주세요.")
 
-# 2. 지급 페이지 (사진 표시 기능 추가)
+# 2. 지급 페이지 (안전장치 추가됨)
 def page_distribute():
     st.markdown("### 🎁 물품 지급 (DISTRIBUTE)")
     c1, c2 = st.columns([1, 2])
@@ -247,16 +246,17 @@ def page_distribute():
         if t_name != "없음":
             info = run_query(f"SELECT {'back_number' if t_type=='선수' else 'role'}, top_size, bottom_size, shoe_size, image_path FROM {'players' if t_type=='선수' else 'staff'} WHERE name=?", (t_name,))
             if info:
-                # 사진 처리
-                img_data = info[0][4]
+                # [수정] 이미지 에러 방지 로직
                 img_html = ""
-                if img_data and len(str(img_data)) > 10: # Base64 데이터가 있다면
-                    img_html = f'<img src="data:image/jpeg;base64,{img_data}" style="width:120px; height:120px; object-fit:cover; border-radius:50%; border:3px solid white; margin-bottom:10px;">'
-                else:
-                    # 기본 이미지 (배구공 아이콘 등)
-                    img_html = '<div style="width:120px; height:120px; background-color:#ddd; border-radius:50%; border:3px solid white; display:flex; align-items:center; justify-content:center; margin-bottom:10px; color:black; font-weight:bold; font-size:40px;">🏐</div>'
+                try:
+                    img_data = info[0][4]
+                    if img_data and len(str(img_data)) > 50: # Base64 길이 체크
+                        img_html = f'<img src="data:image/jpeg;base64,{img_data}" style="width:120px; height:120px; object-fit:cover; border-radius:50%; border:3px solid white; margin-bottom:10px;">'
+                    else:
+                        img_html = '<div style="width:120px; height:120px; background-color:#ddd; border-radius:50%; border:3px solid white; display:flex; align-items:center; justify-content:center; margin:0 auto 10px auto; color:black; font-weight:bold; font-size:40px;">🏐</div>'
+                except:
+                    img_html = '<div style="width:120px; height:120px; background-color:#ddd; border-radius:50%; border:3px solid white; display:flex; align-items:center; justify-content:center; margin:0 auto 10px auto; color:black; font-weight:bold; font-size:40px;">🏐</div>'
 
-                # 카드 HTML
                 st.markdown(f"""
                 <div style="background-color:#003399; padding:20px; border-radius:15px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); border: 1px solid #333; text-align:center;">
                     {img_html}
@@ -305,9 +305,7 @@ def page_inventory():
     sql += " ORDER BY category, item_name"
     df = get_dataframe(sql, params)
     
-    # 드래그 선택 표
     event = st.dataframe(df, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
-    
     if len(event.selection.rows) > 0:
         selected_rows = df.iloc[event.selection.rows]
         ids_to_delete = selected_rows['id'].tolist()
@@ -326,7 +324,7 @@ def page_inventory():
                 st.success("수정 완료!")
                 st.rerun()
 
-# 4. 선수 명단 (사진 업로드 추가)
+# 4. 선수 명단 (안전장치 추가됨)
 def page_players():
     st.markdown("### 🏐 선수 명단")
     with st.expander("➕ 선수 등록"):
@@ -337,10 +335,10 @@ def page_players():
         c4, c5 = st.columns(2)
         p_top = c4.selectbox("상의", CLOTHES_SIZES)
         p_bot = c5.selectbox("하의", CLOTHES_SIZES)
-        p_img = st.file_uploader("프로필 사진", type=['png', 'jpg', 'jpeg']) # 사진 업로드
+        p_img = st.file_uploader("프로필 사진", type=['png', 'jpg', 'jpeg'])
         
         if st.button("저장"):
-            img_b64 = image_to_base64(p_img) # 이미지 변환
+            img_b64 = image_to_base64(p_img)
             run_query("INSERT INTO players (name, back_number, top_size, bottom_size, shoe_size, image_path) VALUES (?,?,?,?,?,?)", 
                       (p_name, p_num, p_top, p_bot, p_shoe, img_b64), fetch=False)
             st.rerun()
@@ -354,15 +352,18 @@ def page_players():
         if st.button(f"🗑️ 선택한 {len(ids_to_delete)}명 삭제", type="primary"):
             confirm_delete_dialog(ids_to_delete, "players", st.rerun)
 
-    # 선수 수정 (사진 수정 포함)
+    # 선수 수정 (안전장치 추가)
     with st.expander("🛠️ 정보 수정"):
         edit_target = st.selectbox("수정 대상", df['이름'].tolist() if not df.empty else [])
         if edit_target:
             p_curr = run_query("SELECT * FROM players WHERE name=?", (edit_target,))[0]
             
-            # 현재 사진 미리보기
-            if p_curr[6] and len(str(p_curr[6])) > 10:
-                st.image(BytesIO(base64.b64decode(p_curr[6])), caption="현재 사진", width=100)
+            # [수정] 이미지 로드 에러 방지
+            try:
+                if p_curr[6] and len(str(p_curr[6])) > 50:
+                    st.image(BytesIO(base64.b64decode(p_curr[6])), caption="현재 사진", width=100)
+            except:
+                st.warning("기존 이미지를 불러올 수 없습니다.")
             
             ec1, ec2 = st.columns(2)
             e_num = ec1.text_input("배번", value=p_curr[2])
@@ -370,11 +371,11 @@ def page_players():
             e_img = st.file_uploader("사진 변경 (선택)", type=['png', 'jpg', 'jpeg'], key="p_edit")
             
             if st.button("수정 완료"):
-                new_img = image_to_base64(e_img) if e_img else p_curr[6] # 새 사진 없으면 기존 유지
+                new_img = image_to_base64(e_img) if e_img else p_curr[6]
                 run_query("UPDATE players SET back_number=?, shoe_size=?, image_path=? WHERE id=?", (e_num, e_shoe, new_img, p_curr[0]), fetch=False)
                 st.rerun()
 
-# 5. 스텝 명단 (사진 업로드 추가)
+# 5. 스텝 명단 (안전장치 추가됨)
 def page_staff():
     st.markdown("### 👔 스텝 명단")
     with st.expander("➕ 스텝 등록"):
@@ -402,14 +403,17 @@ def page_staff():
         if st.button(f"🗑️ 선택한 {len(ids_to_delete)}명 삭제", type="primary"):
             confirm_delete_dialog(ids_to_delete, "staff", st.rerun)
 
-    # 스텝 수정
+    # 스텝 수정 (안전장치 추가)
     with st.expander("🛠️ 정보 수정"):
         edit_s_target = st.selectbox("수정 대상", df['이름'].tolist() if not df.empty else [])
         if edit_s_target:
             s_curr = run_query("SELECT * FROM staff WHERE name=?", (edit_s_target,))[0]
             
-            if s_curr[6] and len(str(s_curr[6])) > 10:
-                st.image(BytesIO(base64.b64decode(s_curr[6])), caption="현재 사진", width=100)
+            try:
+                if s_curr[6] and len(str(s_curr[6])) > 50:
+                    st.image(BytesIO(base64.b64decode(s_curr[6])), caption="현재 사진", width=100)
+            except:
+                st.warning("기존 이미지를 불러올 수 없습니다.")
 
             ec1, ec2 = st.columns(2)
             e_role = ec1.selectbox("직책", STAFF_ROLES, index=STAFF_ROLES.index(s_curr[2]) if s_curr[2] in STAFF_ROLES else 0)
