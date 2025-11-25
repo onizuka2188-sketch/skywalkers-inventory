@@ -7,9 +7,10 @@ from io import BytesIO
 from PIL import Image
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import json
 
 # ---------------------------------------------------------
-# [긴급 처방] 다크모드 강제 고정 설정 생성 (config.toml)
+# [긴급 처방] 다크모드 강제 고정 설정 생성
 # ---------------------------------------------------------
 def create_config():
     if not os.path.exists(".streamlit"):
@@ -44,18 +45,31 @@ STAFF_ROLES = ["감독", "수석코치", "코치", "트레이너", "전력분석
 CATEGORIES = ["전체보기", "하계용품", "동계용품", "연습복", "유니폼", "양말", "신발"]
 MEMO_CATS = ["팀 연혁", "드래프트", "트레이드", "입/퇴사", "부상/재활", "기타 비고"]
 
-# --- 구글 스프레드시트 연결 설정 ---
+# --- ★★★ [수정됨] 구글 스프레드시트 연결 설정 (Secrets 우선 확인) ★★★ ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 @st.cache_resource
 def init_connection():
     try:
-        if os.path.exists('service_account.json'):
+        # 1. Streamlit Cloud의 'Secrets(비밀금고)' 먼저 확인
+        if "gcp_service_account" in st.secrets:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            # private_key의 줄바꿈 문자(\n) 처리
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
+            client = gspread.authorize(creds)
+            return client.open("skywalkers_db")
+            
+        # 2. 내 컴퓨터(로컬)에 있는 파일 확인
+        elif os.path.exists('service_account.json'):
             creds = ServiceAccountCredentials.from_json_keyfile_name('service_account.json', SCOPE)
             client = gspread.authorize(creds)
             return client.open("skywalkers_db")
+            
         else:
             return None
+
     except Exception as e:
         st.error(f"❌ 구글 시트 연결 실패: {e}")
         return None
@@ -266,7 +280,7 @@ def main():
 # 1. 물품 입고 (구글 시트)
 def page_inbound():
     st.markdown("### 📥 물품 입고 (ADD ITEMS)")
-    if not sh: st.error("구글 시트 연결 실패! service_account.json 파일을 확인하세요."); return
+    if not sh: st.error("구글 시트 연결 실패! Secrets 설정 또는 service_account.json을 확인하세요."); return
     st.info("구글 스프레드시트에 자동 저장됩니다.")
     
     col1, col2 = st.columns(2)
@@ -382,15 +396,12 @@ def page_inventory():
         if search:
             df_view = df_view[df_view['item_name'].str.contains(search)]
         
-        # [한글 컬럼명으로 변경하여 표시]
-        df_display = df_view[['id', 'category', 'item_name', 'size', 'quantity']].copy()
-        df_display.columns = ['ID', '구분', '품명', '사이즈', '잔여수량']
-        
-        event = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row", key="inv_event")
+        view_cols = ['id', 'category', 'item_name', 'size', 'quantity']
+        event = st.dataframe(df_view[view_cols], use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row", key="inv_event")
         
         if len(event.selection.rows) > 0:
             selected_indices = event.selection.rows
-            ids_to_delete = df_display.iloc[selected_indices]['ID'].tolist()
+            ids_to_delete = df_view.iloc[selected_indices]['id'].tolist()
             if st.button(f"🗑️ 선택한 {len(ids_to_delete)}개 항목 삭제", type="primary"):
                 confirm_delete_dialog(ids_to_delete, "inventory", st.rerun)
 
@@ -440,7 +451,7 @@ def page_players():
             if st.button(f"🗑️ 선택한 {len(ids_to_delete)}명 삭제", type="primary"):
                 confirm_delete_dialog(ids_to_delete, "players", st.rerun)
 
-        # [수정] 선수 정보 수정 (상의/하의 추가 완료)
+        # [수정] 선수 정보 수정
         with st.expander("🛠️ 정보 수정"):
             edit_target = st.selectbox("수정 대상", df['name'].tolist())
             if edit_target:
@@ -456,7 +467,6 @@ def page_players():
                 e_shoe = ec3.selectbox("신발", SHOE_SIZES, index=SHOE_SIZES.index(str(p_curr['shoe_size'])) if str(p_curr['shoe_size']) in SHOE_SIZES else 0, key="eps")
                 
                 ec4, ec5 = st.columns(2)
-                # [추가됨] 상의/하의 수정
                 e_top = ec4.selectbox("상의", CLOTHES_SIZES, index=CLOTHES_SIZES.index(str(p_curr['top_size'])) if str(p_curr['top_size']) in CLOTHES_SIZES else 0, key="ept")
                 e_bot = ec5.selectbox("하의", CLOTHES_SIZES, index=CLOTHES_SIZES.index(str(p_curr['bottom_size'])) if str(p_curr['bottom_size']) in CLOTHES_SIZES else 0, key="epb")
                 
