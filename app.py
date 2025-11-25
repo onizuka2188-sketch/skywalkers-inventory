@@ -46,8 +46,8 @@ st.markdown("""
     [data-testid="stSidebar"] * {
         color: #FFFFFF !important;
     }
-    /* 사이드바 캡션만 회색 */
-    [data-testid="stSidebar"] .stCaption { color: #888888 !important; }
+    /* 사이드바 캡션(제작자)만 회색 */
+    [data-testid="stSidebar"] .stCaption { color: #999999 !important; font-size: 14px !important; }
 
     /* 4. 입력창(네모칸): 진한 회색 배경 */
     .stTextInput input, .stSelectbox div[data-baseweb="select"] > div, .stNumberInput input, .stDateInput input, .stTextArea textarea {
@@ -188,24 +188,27 @@ def main():
 
     # 세션 상태 초기화
     if 'current_menu' not in st.session_state:
-        st.session_state.current_menu = '지급 하기'
+        st.session_state.current_menu = '물품 입고'
 
     # 사이드바
     with st.sidebar:
-        st.markdown("# 🏐 SKYWALKERS")
-        st.caption(f"Manager: 유영욱 | {datetime.now().strftime('%Y-%m-%d')}")
+        st.markdown("## 🏐 HYUNDAI CAPITAL")
+        st.markdown("## SKYWALKERS")
+        st.caption(f"제작자 : 네바아빠 | {datetime.now().strftime('%Y-%m-%d')}")
         st.markdown("---")
 
-        st.markdown("### 👥 인원 및 기록")
-        if st.button("🏐 선수 명단", use_container_width=True): st.session_state.current_menu = "선수 명단"
-        if st.button("👔 스텝 명단", use_container_width=True): st.session_state.current_menu = "스텝 명단"
-        if st.button("📋 전체 내역", use_container_width=True): st.session_state.current_menu = "전체 내역"
-        if st.button("📝 비고/연혁", use_container_width=True): st.session_state.current_menu = "비고/연혁"
-
+        # [수정] 1. 물품 및 지급 (위로 이동 + 전체내역 포함)
         st.markdown("### 📦 물품 및 지급")
         if st.button("📥 물품 입고", use_container_width=True): st.session_state.current_menu = "물품 입고"
         if st.button("🎁 지급 하기", use_container_width=True): st.session_state.current_menu = "지급 하기"
         if st.button("📦 재고 현황", use_container_width=True): st.session_state.current_menu = "재고 현황"
+        if st.button("📋 전체 내역", use_container_width=True): st.session_state.current_menu = "전체 내역"
+
+        # [수정] 2. 인원 및 기록 (아래로 이동)
+        st.markdown("### 👥 인원 및 기록")
+        if st.button("🏐 선수 명단", use_container_width=True): st.session_state.current_menu = "선수 명단"
+        if st.button("👔 스텝 명단", use_container_width=True): st.session_state.current_menu = "스텝 명단"
+        if st.button("📝 비고/연혁", use_container_width=True): st.session_state.current_menu = "비고/연혁"
         
         st.markdown("---")
 
@@ -335,7 +338,7 @@ def page_inventory():
     
     st.dataframe(get_dataframe(sql, params), use_container_width=True, hide_index=True)
     
-    with st.expander("🗑️ 데이터 정리"):
+    with st.expander("🗑️ 데이터 정리 (잘못된 입고 삭제)"):
         del_id = st.number_input("삭제할 ID (inventory 테이블)", 0)
         if st.button("삭제"):
             run_query("DELETE FROM inventory WHERE id=?", (del_id,), fetch=False)
@@ -383,18 +386,42 @@ def page_staff():
     df = get_dataframe("SELECT role as '직책', name as '이름', top_size as '상의', bottom_size as '하의', shoe_size as '신발' FROM staff ORDER BY role")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-# 6. 전체 내역
+# 6. [수정] 전체 내역 (삭제 기능 추가)
 def page_history():
     st.markdown("### 📋 전체 내역")
-    t1, t2 = st.tabs(["📤 지급 내역", "📥 입고 내역"])
+    t1, t2 = st.tabs(["📤 지급 내역 (OUT)", "📥 입고 내역 (IN)"])
+    
+    # [Tab 1] 지급 내역 삭제 기능 추가
     with t1:
         search = st.text_input("이름 검색")
-        sql = "SELECT date as '날짜', target_name as '이름', item_name as '품명', size as '사이즈', quantity as '수량' FROM logs WHERE 1=1"
+        sql = "SELECT id, date as '날짜', target_name as '이름', item_name as '품명', size as '사이즈', quantity as '수량' FROM logs WHERE 1=1"
         if search: sql += f" AND target_name LIKE '%{search}%'"
         sql += " ORDER BY id DESC"
-        st.dataframe(get_dataframe(sql), use_container_width=True, hide_index=True)
+        
+        df_out = get_dataframe(sql)
+        st.dataframe(df_out, use_container_width=True, hide_index=True)
+        
+        with st.expander("🗑️ 지급 내역 삭제 (주의: 재고는 복구되지 않음)"):
+            del_out_ids = st.multiselect("삭제할 기록 ID 선택", df_out['id'].tolist())
+            if st.button("지급 기록 삭제"):
+                for did in del_out_ids:
+                    run_query("DELETE FROM logs WHERE id=?", (did,), fetch=False)
+                st.success("삭제 완료")
+                st.rerun()
+
+    # [Tab 2] 입고 내역 삭제 기능 유지
     with t2:
-        st.dataframe(get_dataframe("SELECT date as '날짜', item_name as '품명', size as '사이즈', quantity as '수량' FROM inbound_logs ORDER BY id DESC"), use_container_width=True, hide_index=True)
+        sql_in = "SELECT id, date as '날짜', item_name as '품명', size as '사이즈', quantity as '수량' FROM inbound_logs ORDER BY id DESC"
+        df_in = get_dataframe(sql_in)
+        st.dataframe(df_in, use_container_width=True, hide_index=True)
+        
+        with st.expander("🗑️ 입고 내역 삭제"):
+            del_in_ids = st.multiselect("삭제할 ID 선택", df_in['id'].tolist())
+            if st.button("입고 기록 삭제"):
+                for did in del_in_ids:
+                    run_query("DELETE FROM inbound_logs WHERE id=?", (did,), fetch=False)
+                st.success("삭제 완료")
+                st.rerun()
 
 # 7. 비고
 def page_memo():
