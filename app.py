@@ -8,6 +8,7 @@ from PIL import Image
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import json
+import toml
 
 # ---------------------------------------------------------
 # [긴급 처방] 다크모드 강제 고정 설정 생성
@@ -45,29 +46,32 @@ STAFF_ROLES = ["감독", "수석코치", "코치", "트레이너", "전력분석
 CATEGORIES = ["전체보기", "하계용품", "동계용품", "연습복", "유니폼", "양말", "신발"]
 MEMO_CATS = ["팀 연혁", "드래프트", "트레이드", "입/퇴사", "부상/재활", "기타 비고"]
 
-# --- ★★★ [수정됨] 구글 스프레드시트 연결 설정 (Secrets 우선 확인) ★★★ ---
+# --- ★★★ [수정됨] 구글 스프레드시트 연결 설정 (로컬/웹 자동 감지) ★★★ ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 @st.cache_resource
 def init_connection():
     try:
-        # 1. Streamlit Cloud의 'Secrets(비밀금고)' 먼저 확인
-        if "gcp_service_account" in st.secrets:
+        # 1. 내 컴퓨터(로컬)에 파일이 있는지 먼저 확인 (이게 제일 확실함)
+        if os.path.exists('service_account.json'):
+            creds = ServiceAccountCredentials.from_json_keyfile_name('service_account.json', SCOPE)
+            client = gspread.authorize(creds)
+            return client.open("skywalkers_db")
+            
+        # 2. 파일이 없으면(웹 배포 환경), Streamlit Secrets를 확인
+        elif "gcp_service_account" in st.secrets:
             creds_dict = dict(st.secrets["gcp_service_account"])
-            # private_key의 줄바꿈 문자(\n) 처리
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            # private_key 줄바꿈 처리
+            if "\\n" in creds_dict["private_key"]:
+                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
             
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
             client = gspread.authorize(creds)
             return client.open("skywalkers_db")
             
-        # 2. 내 컴퓨터(로컬)에 있는 파일 확인
-        elif os.path.exists('service_account.json'):
-            creds = ServiceAccountCredentials.from_json_keyfile_name('service_account.json', SCOPE)
-            client = gspread.authorize(creds)
-            return client.open("skywalkers_db")
-            
         else:
+            # 둘 다 없으면 에러
+            st.error("🚨 인증 파일을 찾을 수 없습니다! (service_account.json 또는 Secrets)")
             return None
 
     except Exception as e:
@@ -169,7 +173,7 @@ st.markdown("""
         background-color: #262730 !important; color: #FFFFFF !important; border: 1px solid #444444 !important;
     }
     
-    /* 5. 드롭다운 메뉴 (검은 배경 + 흰 글씨) */
+    /* 5. 드롭다운 메뉴 */
     div[data-baseweb="popover"], ul[data-baseweb="menu"] { 
         background-color: #262730 !important; 
         border: 1px solid #444444 !important; 
@@ -222,6 +226,7 @@ st.markdown("""
 def confirm_delete_dialog(ids, table_name, rerun_callback):
     st.warning(f"선택한 {len(ids)}개 항목을 정말 삭제하시겠습니까?")
     st.markdown("삭제 후에는 복구할 수 없습니다. (구글 시트에서 삭제됨)")
+    
     col_a, col_b = st.columns(2)
     with col_a:
         if st.button("확인 (삭제)", type="primary", use_container_width=True):
@@ -280,7 +285,7 @@ def main():
 # 1. 물품 입고 (구글 시트)
 def page_inbound():
     st.markdown("### 📥 물품 입고 (ADD ITEMS)")
-    if not sh: st.error("구글 시트 연결 실패! Secrets 설정 또는 service_account.json을 확인하세요."); return
+    if not sh: st.error("구글 시트 연결 실패! service_account.json 파일을 확인하세요."); return
     st.info("구글 스프레드시트에 자동 저장됩니다.")
     
     col1, col2 = st.columns(2)
@@ -440,18 +445,13 @@ def page_players():
             
     df = get_data("players")
     if not df.empty:
-        # [한글 컬럼명 표시]
-        df_display = df[['id','back_number','name','top_size','bottom_size','shoe_size']].copy()
-        df_display.columns = ['ID', '배번', '이름', '상의', '하의', '신발']
-        
-        event = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
+        event = st.dataframe(df[['id','back_number','name','top_size','bottom_size','shoe_size']], use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
         if len(event.selection.rows) > 0:
-            selected_rows = df_display.iloc[event.selection.rows]
-            ids_to_delete = selected_rows['ID'].tolist()
+            selected_rows = df.iloc[event.selection.rows]
+            ids_to_delete = selected_rows['id'].tolist()
             if st.button(f"🗑️ 선택한 {len(ids_to_delete)}명 삭제", type="primary"):
                 confirm_delete_dialog(ids_to_delete, "players", st.rerun)
 
-        # [수정] 선수 정보 수정
         with st.expander("🛠️ 정보 수정"):
             edit_target = st.selectbox("수정 대상", df['name'].tolist())
             if edit_target:
@@ -461,27 +461,12 @@ def page_players():
                         st.image(BytesIO(base64.b64decode(p_curr['image_path'])), width=100)
                 except: pass
                 
-                ec1, ec2, ec3 = st.columns(3)
-                e_num = ec1.text_input("배번", value=str(p_curr['back_number']), key="epn")
-                e_name = ec2.text_input("이름", value=p_curr['name'], key="epnn")
-                e_shoe = ec3.selectbox("신발", SHOE_SIZES, index=SHOE_SIZES.index(str(p_curr['shoe_size'])) if str(p_curr['shoe_size']) in SHOE_SIZES else 0, key="eps")
-                
-                ec4, ec5 = st.columns(2)
-                e_top = ec4.selectbox("상의", CLOTHES_SIZES, index=CLOTHES_SIZES.index(str(p_curr['top_size'])) if str(p_curr['top_size']) in CLOTHES_SIZES else 0, key="ept")
-                e_bot = ec5.selectbox("하의", CLOTHES_SIZES, index=CLOTHES_SIZES.index(str(p_curr['bottom_size'])) if str(p_curr['bottom_size']) in CLOTHES_SIZES else 0, key="epb")
-                
-                e_img = st.file_uploader("사진 변경 (선택)", type=['png', 'jpg'], key="p_edit_img")
-
+                ec1, ec2 = st.columns(2)
+                e_num = ec1.text_input("배번", value=p_curr['back_number'], key="epn")
+                e_shoe = ec2.selectbox("신발", SHOE_SIZES, index=SHOE_SIZES.index(str(p_curr['shoe_size'])) if str(p_curr['shoe_size']) in SHOE_SIZES else 0, key="eps")
                 if st.button("수정 완료", key="bpe"):
                     update_data("players", p_curr['id'], "back_number", e_num)
-                    update_data("players", p_curr['id'], "name", e_name)
                     update_data("players", p_curr['id'], "shoe_size", e_shoe)
-                    update_data("players", p_curr['id'], "top_size", e_top)
-                    update_data("players", p_curr['id'], "bottom_size", e_bot)
-                    if e_img:
-                        new_img = image_to_base64(e_img)
-                        update_data("players", p_curr['id'], "image_path", new_img)
-                    st.success("수정 완료")
                     st.rerun()
 
 # 5. 스텝 명단 (구글 시트)
@@ -504,49 +489,12 @@ def page_staff():
 
     df = get_data("staff")
     if not df.empty:
-        # [한글 컬럼명 표시]
-        df_display = df[['id','role','name','top_size','bottom_size','shoe_size']].copy()
-        df_display.columns = ['ID', '직책', '이름', '상의', '하의', '신발']
-
-        event = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
+        event = st.dataframe(df[['id','role','name','top_size','bottom_size','shoe_size']], use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
         if len(event.selection.rows) > 0:
-            selected_rows = df_display.iloc[event.selection.rows]
-            ids_to_delete = selected_rows['ID'].tolist()
+            selected_rows = df.iloc[event.selection.rows]
+            ids_to_delete = selected_rows['id'].tolist()
             if st.button(f"🗑️ 선택한 {len(ids_to_delete)}명 삭제", type="primary"):
                 confirm_delete_dialog(ids_to_delete, "staff", st.rerun)
-        
-        # [추가됨] 스텝 정보 수정 기능
-        with st.expander("🛠️ 정보 수정"):
-            edit_target = st.selectbox("수정 대상", df['name'].tolist())
-            if edit_target:
-                s_curr = df[df['name'] == edit_target].iloc[0]
-                try:
-                    if str(s_curr['image_path']) and len(str(s_curr['image_path'])) > 50:
-                        st.image(BytesIO(base64.b64decode(s_curr['image_path'])), width=100)
-                except: pass
-                
-                ec1, ec2 = st.columns(2)
-                e_role = ec1.selectbox("직책", STAFF_ROLES, index=STAFF_ROLES.index(s_curr['role']) if s_curr['role'] in STAFF_ROLES else 0, key="esr")
-                e_name = ec2.text_input("이름", value=s_curr['name'], key="esn")
-                
-                ec3, ec4, ec5 = st.columns(3)
-                e_top = ec3.selectbox("상의", CLOTHES_SIZES, index=CLOTHES_SIZES.index(str(s_curr['top_size'])) if str(s_curr['top_size']) in CLOTHES_SIZES else 0, key="est")
-                e_bot = ec4.selectbox("하의", CLOTHES_SIZES, index=CLOTHES_SIZES.index(str(s_curr['bottom_size'])) if str(s_curr['bottom_size']) in CLOTHES_SIZES else 0, key="esb")
-                e_shoe = ec5.selectbox("신발", SHOE_SIZES, index=SHOE_SIZES.index(str(s_curr['shoe_size'])) if str(s_curr['shoe_size']) in SHOE_SIZES else 0, key="ess")
-                
-                e_img = st.file_uploader("사진 변경 (선택)", type=['png', 'jpg'], key="s_img_edit")
-
-                if st.button("수정 완료", key="bse"):
-                    update_data("staff", s_curr['id'], "role", e_role)
-                    update_data("staff", s_curr['id'], "name", e_name)
-                    update_data("staff", s_curr['id'], "top_size", e_top)
-                    update_data("staff", s_curr['id'], "bottom_size", e_bot)
-                    update_data("staff", s_curr['id'], "shoe_size", e_shoe)
-                    if e_img:
-                        new_img = image_to_base64(e_img)
-                        update_data("staff", s_curr['id'], "image_path", new_img)
-                    st.success("수정 완료")
-                    st.rerun()
 
 # 6. 전체 내역 (구글 시트)
 def page_history():
@@ -559,14 +507,9 @@ def page_history():
         if not df_out.empty:
             if search: df_out = df_out[df_out['target_name'].str.contains(search)]
             df_out = df_out.sort_values(by='id', ascending=False)
-            
-            # [한글 컬럼명]
-            df_disp = df_out[['id','date','target_name','item_name','size','quantity']].copy()
-            df_disp.columns = ['ID','날짜','이름','품명','사이즈','수량']
-
-            event_out = st.dataframe(df_disp, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
+            event_out = st.dataframe(df_out, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
             if len(event_out.selection.rows) > 0:
-                ids = df_disp.iloc[event_out.selection.rows]['ID'].tolist()
+                ids = df_out.iloc[event_out.selection.rows]['id'].tolist()
                 if st.button(f"🗑️ 선택한 {len(ids)}개 지급 내역 삭제", type="primary"):
                     confirm_delete_dialog(ids, "logs", st.rerun)
 
@@ -574,13 +517,9 @@ def page_history():
         df_in = get_data("inbound_logs")
         if not df_in.empty:
             df_in = df_in.sort_values(by='id', ascending=False)
-            # [한글 컬럼명]
-            df_disp_in = df_in[['id','date','item_name','size','quantity']].copy()
-            df_disp_in.columns = ['ID','날짜','품명','사이즈','수량']
-
-            event_in = st.dataframe(df_disp_in, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
+            event_in = st.dataframe(df_in, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
             if len(event_in.selection.rows) > 0:
-                ids = df_disp_in.iloc[event_in.selection.rows]['ID'].tolist()
+                ids = df_in.iloc[event_in.selection.rows]['id'].tolist()
                 if st.button(f"🗑️ 선택한 {len(ids)}개 입고 내역 삭제", type="primary"):
                     confirm_delete_dialog(ids, "inbound_logs", st.rerun)
 
