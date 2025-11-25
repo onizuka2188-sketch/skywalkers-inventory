@@ -233,7 +233,7 @@ def page_inbound():
             st.success(f"✅ {i_name} ({i_size}) {i_qty}개 입고 완료!")
         else: st.error("품명을 입력해주세요.")
 
-# 2. 지급 페이지 (안전장치 추가됨)
+# 2. 지급 페이지
 def page_distribute():
     st.markdown("### 🎁 물품 지급 (DISTRIBUTE)")
     c1, c2 = st.columns([1, 2])
@@ -246,11 +246,10 @@ def page_distribute():
         if t_name != "없음":
             info = run_query(f"SELECT {'back_number' if t_type=='선수' else 'role'}, top_size, bottom_size, shoe_size, image_path FROM {'players' if t_type=='선수' else 'staff'} WHERE name=?", (t_name,))
             if info:
-                # [수정] 이미지 에러 방지 로직
                 img_html = ""
                 try:
                     img_data = info[0][4]
-                    if img_data and len(str(img_data)) > 50: # Base64 길이 체크
+                    if img_data and len(str(img_data)) > 50: 
                         img_html = f'<img src="data:image/jpeg;base64,{img_data}" style="width:120px; height:120px; object-fit:cover; border-radius:50%; border:3px solid white; margin-bottom:10px;">'
                     else:
                         img_html = '<div style="width:120px; height:120px; background-color:#ddd; border-radius:50%; border:3px solid white; display:flex; align-items:center; justify-content:center; margin:0 auto 10px auto; color:black; font-weight:bold; font-size:40px;">🏐</div>'
@@ -324,7 +323,7 @@ def page_inventory():
                 st.success("수정 완료!")
                 st.rerun()
 
-# 4. 선수 명단 (안전장치 추가됨)
+# 4. 선수 명단 (수정 Key 추가 완료)
 def page_players():
     st.markdown("### 🏐 선수 명단")
     with st.expander("➕ 선수 등록"):
@@ -352,13 +351,12 @@ def page_players():
         if st.button(f"🗑️ 선택한 {len(ids_to_delete)}명 삭제", type="primary"):
             confirm_delete_dialog(ids_to_delete, "players", st.rerun)
 
-    # 선수 수정 (안전장치 추가)
+    # 선수 수정 (Key 추가)
     with st.expander("🛠️ 정보 수정"):
         edit_target = st.selectbox("수정 대상", df['이름'].tolist() if not df.empty else [])
         if edit_target:
             p_curr = run_query("SELECT * FROM players WHERE name=?", (edit_target,))[0]
             
-            # [수정] 이미지 로드 에러 방지
             try:
                 if p_curr[6] and len(str(p_curr[6])) > 50:
                     st.image(BytesIO(base64.b64decode(p_curr[6])), caption="현재 사진", width=100)
@@ -366,16 +364,16 @@ def page_players():
                 st.warning("기존 이미지를 불러올 수 없습니다.")
             
             ec1, ec2 = st.columns(2)
-            e_num = ec1.text_input("배번", value=p_curr[2])
-            e_shoe = ec2.selectbox("신발", SHOE_SIZES, index=SHOE_SIZES.index(p_curr[5]) if p_curr[5] in SHOE_SIZES else 0)
-            e_img = st.file_uploader("사진 변경 (선택)", type=['png', 'jpg', 'jpeg'], key="p_edit")
+            e_num = ec1.text_input("배번", value=p_curr[2], key="edit_p_num") # Key 추가
+            e_shoe = ec2.selectbox("신발", SHOE_SIZES, index=SHOE_SIZES.index(p_curr[5]) if p_curr[5] in SHOE_SIZES else 0, key="edit_p_shoe") # Key 추가
+            e_img = st.file_uploader("사진 변경 (선택)", type=['png', 'jpg', 'jpeg'], key="edit_p_img") # Key 수정
             
-            if st.button("수정 완료"):
+            if st.button("수정 완료", key="btn_p_edit"): # Key 추가
                 new_img = image_to_base64(e_img) if e_img else p_curr[6]
                 run_query("UPDATE players SET back_number=?, shoe_size=?, image_path=? WHERE id=?", (e_num, e_shoe, new_img, p_curr[0]), fetch=False)
                 st.rerun()
 
-# 5. 스텝 명단 (안전장치 추가됨)
+# 5. 스텝 명단 (수정 Key 추가 완료)
 def page_staff():
     st.markdown("### 👔 스텝 명단")
     with st.expander("➕ 스텝 등록"):
@@ -403,7 +401,7 @@ def page_staff():
         if st.button(f"🗑️ 선택한 {len(ids_to_delete)}명 삭제", type="primary"):
             confirm_delete_dialog(ids_to_delete, "staff", st.rerun)
 
-    # 스텝 수정 (안전장치 추가)
+    # 스텝 수정 (Key 추가)
     with st.expander("🛠️ 정보 수정"):
         edit_s_target = st.selectbox("수정 대상", df['이름'].tolist() if not df.empty else [])
         if edit_s_target:
@@ -416,11 +414,14 @@ def page_staff():
                 st.warning("기존 이미지를 불러올 수 없습니다.")
 
             ec1, ec2 = st.columns(2)
-            e_role = ec1.selectbox("직책", STAFF_ROLES, index=STAFF_ROLES.index(s_curr[2]) if s_curr[2] in STAFF_ROLES else 0)
-            e_name = ec2.text_input("이름", value=s_curr[1])
-            e_img = st.file_uploader("사진 변경 (선택)", type=['png', 'jpg', 'jpeg'], key="s_edit")
+            # 여기서 Key 추가
+            e_role = ec1.selectbox("직책", STAFF_ROLES, index=STAFF_ROLES.index(s_curr[2]) if s_curr[2] in STAFF_ROLES else 0, key="edit_s_role")
+            e_name = ec2.text_input("이름", value=s_curr[1], key="edit_s_name")
             
-            if st.button("수정 완료"):
+            # 이미지 업로더에도 유니크한 Key 적용
+            e_img = st.file_uploader("사진 변경 (선택)", type=['png', 'jpg', 'jpeg'], key="edit_s_img")
+            
+            if st.button("수정 완료", key="btn_s_edit"):
                 new_img = image_to_base64(e_img) if e_img else s_curr[6]
                 run_query("UPDATE staff SET name=?, role=?, image_path=? WHERE id=?", (e_name, e_role, new_img, s_curr[0]), fetch=False)
                 st.rerun()
