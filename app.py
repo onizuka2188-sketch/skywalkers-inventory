@@ -15,24 +15,34 @@ STAFF_ROLES = ["감독", "수석코치", "코치", "트레이너", "전력분석
 CATEGORIES = ["전체보기", "하계용품", "동계용품", "연습복", "유니폼", "양말", "신발"]
 MEMO_CATS = ["팀 연혁", "드래프트", "트레이드", "입/퇴사", "부상/재활", "기타 비고"]
 
-# --- 구글 스프레드시트 연결 설정 ---
+# ... (윗부분 import는 그대로 두세요) ...
+
+# --- 구글 스프레드시트 연결 설정 (진단 모드) ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 @st.cache_resource
 def init_connection():
+    # 1. 파일이 진짜 있는지 확인
+    if not os.path.exists('service_account.json'):
+        st.error("🚨 서버에서 'service_account.json' 파일을 못 찾고 있습니다!")
+        st.write("현재 파일 목록:", os.listdir()) # 현재 폴더에 있는 파일 다 보여줌
+        return None
+    
     try:
-        if os.path.exists('service_account.json'):
-            creds = ServiceAccountCredentials.from_json_keyfile_name('service_account.json', SCOPE)
-            client = gspread.authorize(creds)
-            return client.open("skywalkers_db")
-        else:
-            return None
+        creds = ServiceAccountCredentials.from_json_keyfile_name('service_account.json', SCOPE)
+        client = gspread.authorize(creds)
+        # 2. 엑셀 파일 열기 시도
+        return client.open("skywalkers_db") 
+    except gspread.exceptions.SpreadsheetNotFound:
+        st.error("🚨 구글 엑셀 파일을 못 찾았습니다! 엑셀 제목이 'skywalkers_db'가 맞는지, 로봇 이메일을 초대했는지 확인하세요.")
+        return None
     except Exception as e:
-        st.error(f"❌ 구글 시트 연결 실패: {e}")
+        st.error(f"❌ 알 수 없는 오류 발생: {e}")
         return None
 
 sh = init_connection()
 
+# ... (아래 나머지 코드는 그대로 두세요) ...
 # --- 데이터베이스 함수 (구글 시트용) ---
 def get_data(sheet_name):
     if sh:
