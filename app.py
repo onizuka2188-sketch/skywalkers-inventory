@@ -4,6 +4,8 @@ import pandas as pd
 from datetime import datetime
 import os
 import base64
+from io import BytesIO
+from PIL import Image
 
 # --- 설정 ---
 CLOTHES_SIZES = ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "Free"]
@@ -15,7 +17,6 @@ DB_FILENAME = "skywalkers_data.db"
 
 # 폴더 생성 확인
 if not os.path.exists("item_images"): os.makedirs("item_images")
-if not os.path.exists("profile_images"): os.makedirs("profile_images")
 
 # --- 페이지 설정 ---
 st.set_page_config(
@@ -25,121 +26,63 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- [디자인] 스파이더 블랙 테마 (강제 고정) ---
+# --- [CSS 정의] 스파이더 블랙 테마 (강제 고정) ---
 st.markdown("""
     <style>
-    /* 1. 전체 배경: 스파이더 블랙 */
-    .stApp, [data-testid="stAppViewContainer"] {
-        background-color: #111111 !important;
-    }
+    /* 1. 전체 배경 */
+    .stApp, [data-testid="stAppViewContainer"] { background-color: #111111 !important; }
     
-    /* 2. 모든 기본 글씨: 흰색 */
-    h1, h2, h3, h4, h5, h6, p, span, div, label, li, input, textarea {
-        color: #FFFFFF !important;
-    }
+    /* 2. 기본 글씨 */
+    h1, h2, h3, h4, h5, h6, p, span, div, label, li, input, textarea { color: #FFFFFF !important; }
 
-    /* 3. 사이드바: 완전 검정 */
-    [data-testid="stSidebar"] {
-        background-color: #000000 !important;
-        border-right: 1px solid #333333;
-    }
-    [data-testid="stSidebar"] * {
-        color: #FFFFFF !important;
-    }
-    /* 사이드바 캡션(제작자)만 회색 */
+    /* 3. 사이드바 */
+    [data-testid="stSidebar"] { background-color: #000000 !important; border-right: 1px solid #333333; }
+    [data-testid="stSidebar"] * { color: #FFFFFF !important; }
     [data-testid="stSidebar"] .stCaption { color: #999999 !important; font-size: 14px !important; }
 
-    /* 4. 입력창(네모칸): 진한 회색 배경 */
+    /* 4. 입력창 */
     .stTextInput input, .stSelectbox div[data-baseweb="select"] > div, .stNumberInput input, .stDateInput input, .stTextArea textarea {
-        background-color: #262730 !important;
-        color: #FFFFFF !important;
-        border: 1px solid #444444 !important;
+        background-color: #262730 !important; color: #FFFFFF !important; border: 1px solid #444444 !important;
     }
     
-    /* 5. 드롭다운 메뉴 (목록) */
-    div[data-baseweb="popover"], ul[data-baseweb="menu"] {
-        background-color: #262730 !important;
-        border: 1px solid #444444 !important;
-    }
-    ul[data-baseweb="menu"] li {
-        background-color: #262730 !important;
-        color: #FFFFFF !important;
-    }
-    /* 마우스 올렸을 때: 파란색 하이라이트 */
-    ul[data-baseweb="menu"] li:hover {
-        background-color: #003399 !important;
-        color: #FFFFFF !important;
-    }
-    /* 선택된 값 */
-    div[data-baseweb="select"] span {
-        color: #FFFFFF !important;
-    }
+    /* 5. 드롭다운 메뉴 */
+    div[data-baseweb="popover"], ul[data-baseweb="menu"] { background-color: #262730 !important; border: 1px solid #444444 !important; }
+    ul[data-baseweb="menu"] li { background-color: #262730 !important; color: #FFFFFF !important; }
+    ul[data-baseweb="menu"] li:hover { background-color: #003399 !important; color: #FFFFFF !important; }
+    div[data-baseweb="select"] span { color: #FFFFFF !important; }
 
-    /* 6. 버튼 스타일: 스카이워커스 블루 */
-    .stButton > button {
-        background-color: #003399 !important;
-        color: #FFFFFF !important;
-        border: none !important;
-        font-weight: bold;
-    }
-    .stButton > button:hover {
-        background-color: #FFFFFF !important;
-        color: #003399 !important;
-    }
+    /* 6. 버튼 */
+    .stButton > button { background-color: #003399 !important; color: #FFFFFF !important; border: none !important; font-weight: bold; }
+    .stButton > button:hover { background-color: #FFFFFF !important; color: #003399 !important; }
 
-    /* 7. 표(DataFrame) 스타일 */
-    [data-testid="stDataFrame"] {
-        background-color: #111111 !important;
-    }
-    [data-testid="stDataFrame"] th {
-        background-color: #003399 !important;
-        color: #FFFFFF !important;
-    }
-    [data-testid="stDataFrame"] td {
-        background-color: #111111 !important;
-        color: #FFFFFF !important;
-        border-bottom: 1px solid #333 !important;
-    }
+    /* 7. 표 */
+    [data-testid="stDataFrame"] { background-color: #111111 !important; }
+    [data-testid="stDataFrame"] th { background-color: #003399 !important; color: #FFFFFF !important; }
+    [data-testid="stDataFrame"] td { background-color: #111111 !important; color: #FFFFFF !important; border-bottom: 1px solid #333 !important; }
 
-    /* 8. 확장 패널 (Expander) */
-    .streamlit-expanderHeader {
-        background-color: #222222 !important;
-        color: #FFFFFF !important;
-        border: 1px solid #444;
-    }
-    .streamlit-expanderContent {
-        background-color: #111111 !important;
-        color: #FFFFFF !important;
-        border-top: 1px solid #444;
-    }
+    /* 8. 확장 패널 */
+    .streamlit-expanderHeader { background-color: #222222 !important; color: #FFFFFF !important; border: 1px solid #444; }
+    .streamlit-expanderContent { background-color: #111111 !important; color: #FFFFFF !important; border-top: 1px solid #444; }
 
-    /* 9. 헤더 로고 박스 (흰 배경 유지 - 로고 잘 보이게) */
+    /* 9. 헤더 로고 박스 */
     .main-header-container {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        background-color: #FFFFFF !important; 
-        padding: 15px 20px;
-        border-radius: 12px;
-        margin-bottom: 20px;
-        border-bottom: 4px solid #003399;
+        display: flex; justify-content: space-between; align-items: center;
+        background-color: #FFFFFF !important; padding: 15px 20px; border-radius: 12px; margin-bottom: 20px; border-bottom: 4px solid #003399;
     }
-    /* 헤더 박스 안의 글씨는 검정 (흰 배경이니까) */
     .main-header-container h1 { color: #003399 !important; }
     .main-header-container p { color: #000000 !important; }
     .main-header-container span { color: #000000 !important; }
 
-    /* 10. 달력 (Calendar) 강제 다크모드 */
-    div[data-baseweb="calendar"] {
-        background-color: #262730 !important;
-        color: #FFFFFF !important;
-    }
-    div[data-baseweb="calendar"] button {
-        color: #FFFFFF !important;
-    }
-    div[data-baseweb="calendar"] div {
-        color: #FFFFFF !important;
-    }
+    /* 10. 달력 */
+    div[data-baseweb="calendar"] { background-color: #262730 !important; color: #FFFFFF !important; }
+    div[data-baseweb="calendar"] button { color: #FFFFFF !important; }
+    div[data-baseweb="calendar"] div { color: #FFFFFF !important; }
+    
+    /* 11. 팝업창(모달) 스타일 */
+    div[data-baseweb="modal"] div { background-color: #222222 !important; color: white !important; }
+    
+    /* 12. 파일 업로더 */
+    [data-testid="stFileUploader"] { background-color: #262730; padding: 10px; border-radius: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -175,59 +118,82 @@ def get_dataframe(query, params=()):
     conn.close()
     return df
 
-# 이미지 파일을 Base64 문자열로 변환하는 함수
-def get_image_base64(image_path):
+# --- 이미지 처리 함수 (Base64 변환) ---
+def image_to_base64(image_file):
+    if image_file is not None:
+        try:
+            # 이미지를 리사이즈하여 저장 (용량 최적화)
+            img = Image.open(image_file)
+            img = img.convert('RGB')
+            img.thumbnail((300, 300)) # 썸네일 크기
+            buffered = BytesIO()
+            img.save(buffered, format="JPEG")
+            return base64.b64encode(buffered.getvalue()).decode()
+        except Exception as e:
+            return ""
+    return ""
+
+def get_local_image_base64(image_path):
     if os.path.exists(image_path):
         with open(image_path, "rb") as img_file:
             return base64.b64encode(img_file.read()).decode()
     return ""
 
+# --- [NEW] 삭제 확인 팝업창 함수 ---
+@st.dialog("🗑️ 삭제 확인")
+def confirm_delete_dialog(ids, table_name, rerun_callback):
+    st.warning(f"선택한 {len(ids)}개 항목을 정말 삭제하시겠습니까?")
+    st.markdown("삭제 후에는 복구할 수 없습니다.")
+    
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("확인 (삭제)", type="primary", use_container_width=True):
+            for row_id in ids:
+                run_query(f"DELETE FROM {table_name} WHERE id=?", (row_id,), fetch=False)
+            st.success("삭제되었습니다.")
+            rerun_callback()
+    with col_b:
+        if st.button("취소", use_container_width=True):
+            st.rerun()
+
 # --- 메인 앱 로직 ---
 def main():
     init_db()
 
-    # 세션 상태 초기화
     if 'current_menu' not in st.session_state:
         st.session_state.current_menu = '물품 입고'
 
-    # 사이드바
     with st.sidebar:
         st.markdown("## 🏐 HYUNDAI CAPITAL")
         st.markdown("## SKYWALKERS")
         st.caption(f"제작자 : 네바아빠 | {datetime.now().strftime('%Y-%m-%d')}")
         st.markdown("---")
 
-        # [수정] 1. 물품 및 지급 (위로 이동 + 전체내역 포함)
         st.markdown("### 📦 물품 및 지급")
         if st.button("📥 물품 입고", use_container_width=True): st.session_state.current_menu = "물품 입고"
         if st.button("🎁 지급 하기", use_container_width=True): st.session_state.current_menu = "지급 하기"
         if st.button("📦 재고 현황", use_container_width=True): st.session_state.current_menu = "재고 현황"
         if st.button("📋 전체 내역", use_container_width=True): st.session_state.current_menu = "전체 내역"
 
-        # [수정] 2. 인원 및 기록 (아래로 이동)
         st.markdown("### 👥 인원 및 기록")
         if st.button("🏐 선수 명단", use_container_width=True): st.session_state.current_menu = "선수 명단"
         if st.button("👔 스텝 명단", use_container_width=True): st.session_state.current_menu = "스텝 명단"
         if st.button("📝 비고/연혁", use_container_width=True): st.session_state.current_menu = "비고/연혁"
-        
         st.markdown("---")
 
-    # 헤더 표시
     header_html = f"""
     <div class="main-header-container">
-        <img src="data:image/png;base64,{get_image_base64('logo_skywalkers.png')}" style="height:60px;" alt="Skywalkers">
+        <img src="data:image/png;base64,{get_local_image_base64('logo_skywalkers.png')}" style="height:60px;" alt="Skywalkers">
         <div style="text-align:center; flex-grow:1;">
             <h1 style="font-size:2rem; font-weight:900;">HYUNDAI CAPITAL SKYWALKERS</h1>
             <p style="margin:0; font-weight:bold;">EQUIPMENT MANAGEMENT SYSTEM <span>x SPYDER</span></p>
         </div>
-        <img src="data:image/png;base64,{get_image_base64('logo_spyder.png')}" style="height:60px;" alt="Spyder">
+        <img src="data:image/png;base64,{get_local_image_base64('logo_spyder.png')}" style="height:60px;" alt="Spyder">
     </div>
     """
     st.markdown(header_html, unsafe_allow_html=True)
 
-    # 메뉴 라우팅
     menu = st.session_state.current_menu
-    
     if menu == "물품 입고": page_inbound()
     elif menu == "지급 하기": page_distribute()
     elif menu == "재고 현황": page_inventory()
@@ -236,11 +202,10 @@ def main():
     elif menu == "전체 내역": page_history()
     elif menu == "비고/연혁": page_memo()
 
-# 1. 물품 입고 페이지
+# 1. 물품 입고
 def page_inbound():
     st.markdown("### 📥 물품 입고 (ADD ITEMS)")
     st.info("새로운 스파이더 용품이 들어왔을 때 이곳에 입력하세요.")
-
     col1, col2 = st.columns(2)
     with col1:
         i_date = st.date_input("입고 날짜", datetime.now())
@@ -256,10 +221,8 @@ def page_inbound():
         if i_name:
             img_path = ""
             if i_img:
-                save_dir = "item_images"
-                file_path = os.path.join(save_dir, i_img.name)
-                with open(file_path, "wb") as f: f.write(i_img.getbuffer())
-                img_path = file_path
+                # 이미지 파일을 Base64 문자열로 변환하여 저장 (서버 호환성)
+                img_path = image_to_base64(i_img)
             
             exist = run_query("SELECT id, quantity FROM inventory WHERE item_name=? AND size=? AND category=?", (i_name, i_size, i_cat))
             if exist:
@@ -271,7 +234,7 @@ def page_inbound():
             st.success(f"✅ {i_name} ({i_size}) {i_qty}개 입고 완료!")
         else: st.error("품명을 입력해주세요.")
 
-# 2. 지급 페이지
+# 2. 지급 페이지 (사진 표시 기능 추가)
 def page_distribute():
     st.markdown("### 🎁 물품 지급 (DISTRIBUTE)")
     c1, c2 = st.columns([1, 2])
@@ -282,18 +245,29 @@ def page_distribute():
         t_name = st.selectbox("이름", names if names else ["없음"])
         
         if t_name != "없음":
-            info = run_query(f"SELECT {'back_number' if t_type=='선수' else 'role'}, top_size, bottom_size, shoe_size FROM {'players' if t_type=='선수' else 'staff'} WHERE name=?", (t_name,))
+            info = run_query(f"SELECT {'back_number' if t_type=='선수' else 'role'}, top_size, bottom_size, shoe_size, image_path FROM {'players' if t_type=='선수' else 'staff'} WHERE name=?", (t_name,))
             if info:
-                # 정보 카드 디자인 (다크모드 최적화)
+                # 사진 처리
+                img_data = info[0][4]
+                img_html = ""
+                if img_data and len(str(img_data)) > 10: # Base64 데이터가 있다면
+                    img_html = f'<img src="data:image/jpeg;base64,{img_data}" style="width:120px; height:120px; object-fit:cover; border-radius:50%; border:3px solid white; margin-bottom:10px;">'
+                else:
+                    # 기본 이미지 (배구공 아이콘 등)
+                    img_html = '<div style="width:120px; height:120px; background-color:#ddd; border-radius:50%; border:3px solid white; display:flex; align-items:center; justify-content:center; margin-bottom:10px; color:black; font-weight:bold; font-size:40px;">🏐</div>'
+
+                # 카드 HTML
                 st.markdown(f"""
-                <div style="background-color:#003399; padding:20px; border-radius:10px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); border: 1px solid #333;">
-                    <h3 style="color:white !important; border-bottom:2px solid white; padding-bottom:5px; margin-bottom:10px;">{info[0][0]} {t_name}</h3>
-                    <p style="color:white !important; font-size:1.1rem; margin:5px 0;">👕 상의: <b>{info[0][1]}</b></p>
-                    <p style="color:white !important; font-size:1.1rem; margin:5px 0;">👖 하의: <b>{info[0][2]}</b></p>
-                    <p style="color:white !important; font-size:1.1rem; margin:5px 0;">👟 신발: <b>{info[0][3]}</b></p>
+                <div style="background-color:#003399; padding:20px; border-radius:15px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); border: 1px solid #333; text-align:center;">
+                    {img_html}
+                    <h2 style="color:white !important; margin:0; padding-bottom:10px; border-bottom:2px solid white;">{info[0][0]} {t_name}</h2>
+                    <div style="margin-top:15px; text-align:left; padding-left:10px;">
+                        <p style="color:white !important; font-size:1.2rem; margin:5px 0;">👕 상의: <b style="color:#FFD700;">{info[0][1]}</b></p>
+                        <p style="color:white !important; font-size:1.2rem; margin:5px 0;">👖 하의: <b style="color:#FFD700;">{info[0][2]}</b></p>
+                        <p style="color:white !important; font-size:1.2rem; margin:5px 0;">👟 신발: <b style="color:#FFD700;">{info[0][3]}</b></p>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
-
     with c2:
         st.markdown("#### 2. 물품 선택")
         c_filter = st.selectbox("카테고리 선택", CATEGORIES)
@@ -301,17 +275,14 @@ def page_distribute():
         if c_filter != "전체보기": sql_item += f" AND category='{c_filter}'"
         items = [r[0] for r in run_query(sql_item)]
         s_item = st.selectbox("품목 선택", items if items else ["재고 없음"])
-        
         if s_item != "재고 없음":
             sql_size = "SELECT size, quantity, category FROM inventory WHERE item_name=? AND quantity > 0"
             if c_filter != "전체보기": sql_size += " AND category=?"
             params = (s_item,) if c_filter == "전체보기" else (s_item, c_filter)
             stock = run_query(sql_size, params)
-            
             size_opts = {f"{r[0]} (재고: {r[1]})": r for r in stock}
             s_size_opt = st.selectbox("사이즈 선택", list(size_opts.keys()))
             qty = st.number_input("수량", 1, value=1)
-            
             if st.button("🚀 지급 확정", use_container_width=True):
                 r_size, r_qty, r_cat = size_opts[s_size_opt]
                 if r_qty >= qty:
@@ -327,24 +298,35 @@ def page_inventory():
     c1, c2 = st.columns(2)
     v_cat = c1.selectbox("카테고리", CATEGORIES)
     search = c2.text_input("검색")
-    
-    sql = "SELECT category as '구분', item_name as '품명', size as '사이즈', quantity as '수량' FROM inventory WHERE quantity > 0"
+    sql = "SELECT id, category as '구분', item_name as '품명', size as '사이즈', quantity as '수량' FROM inventory WHERE quantity > 0"
     params = []
-    if v_cat != "전체보기": 
-        sql += " AND category=?"; params.append(v_cat)
-    if search:
-        sql += " AND item_name LIKE ?"; params.append(f"%{search}%")
+    if v_cat != "전체보기": sql += " AND category=?"; params.append(v_cat)
+    if search: sql += " AND item_name LIKE ?"; params.append(f"%{search}%")
     sql += " ORDER BY category, item_name"
+    df = get_dataframe(sql, params)
     
-    st.dataframe(get_dataframe(sql, params), use_container_width=True, hide_index=True)
+    # 드래그 선택 표
+    event = st.dataframe(df, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
     
-    with st.expander("🗑️ 데이터 정리 (잘못된 입고 삭제)"):
-        del_id = st.number_input("삭제할 ID (inventory 테이블)", 0)
-        if st.button("삭제"):
-            run_query("DELETE FROM inventory WHERE id=?", (del_id,), fetch=False)
-            st.rerun()
+    if len(event.selection.rows) > 0:
+        selected_rows = df.iloc[event.selection.rows]
+        ids_to_delete = selected_rows['id'].tolist()
+        if st.button(f"🗑️ 선택한 {len(ids_to_delete)}개 항목 삭제", type="primary"):
+            confirm_delete_dialog(ids_to_delete, "inventory", st.rerun)
+    
+    with st.expander("🛠️ 재고 정보 수정 (수량/품명 변경)"):
+        edit_item = st.selectbox("수정할 품목 선택", [f"{r[0]}: {r[2]} - {r[3]}" for r in df.values.tolist()] if not df.empty else [])
+        if edit_item:
+            selected_id = int(edit_item.split(":")[0])
+            curr = run_query("SELECT item_name, quantity FROM inventory WHERE id=?", (selected_id,))[0]
+            new_name = st.text_input("품명 수정", value=curr[0])
+            new_qty = st.number_input("수량 수정", min_value=0, value=curr[1])
+            if st.button("수정 내용 저장"):
+                run_query("UPDATE inventory SET item_name=?, quantity=? WHERE id=?", (new_name, new_qty, selected_id), fetch=False)
+                st.success("수정 완료!")
+                st.rerun()
 
-# 4. 선수 명단
+# 4. 선수 명단 (사진 업로드 추가)
 def page_players():
     st.markdown("### 🏐 선수 명단")
     with st.expander("➕ 선수 등록"):
@@ -355,20 +337,44 @@ def page_players():
         c4, c5 = st.columns(2)
         p_top = c4.selectbox("상의", CLOTHES_SIZES)
         p_bot = c5.selectbox("하의", CLOTHES_SIZES)
+        p_img = st.file_uploader("프로필 사진", type=['png', 'jpg', 'jpeg']) # 사진 업로드
+        
         if st.button("저장"):
-            run_query("INSERT INTO players (name, back_number, top_size, bottom_size, shoe_size) VALUES (?,?,?,?,?)", (p_name, p_num, p_top, p_bot, p_shoe), fetch=False)
+            img_b64 = image_to_base64(p_img) # 이미지 변환
+            run_query("INSERT INTO players (name, back_number, top_size, bottom_size, shoe_size, image_path) VALUES (?,?,?,?,?,?)", 
+                      (p_name, p_num, p_top, p_bot, p_shoe, img_b64), fetch=False)
             st.rerun()
             
-    df = get_dataframe("SELECT name as '이름', back_number as '배번', top_size as '상의', bottom_size as '하의', shoe_size as '신발' FROM players ORDER BY back_number")
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    df = get_dataframe("SELECT id, name as '이름', back_number as '배번', top_size as '상의', bottom_size as '하의', shoe_size as '신발' FROM players ORDER BY back_number")
     
-    with st.expander("🗑️ 삭제"):
-        d_name = st.selectbox("선수 선택", df['이름'].tolist() if not df.empty else [])
-        if st.button("삭제"):
-            run_query("DELETE FROM players WHERE name=?", (d_name,), fetch=False)
-            st.rerun()
+    event = st.dataframe(df, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
+    if len(event.selection.rows) > 0:
+        selected_rows = df.iloc[event.selection.rows]
+        ids_to_delete = selected_rows['id'].tolist()
+        if st.button(f"🗑️ 선택한 {len(ids_to_delete)}명 삭제", type="primary"):
+            confirm_delete_dialog(ids_to_delete, "players", st.rerun)
 
-# 5. 스텝 명단
+    # 선수 수정 (사진 수정 포함)
+    with st.expander("🛠️ 정보 수정"):
+        edit_target = st.selectbox("수정 대상", df['이름'].tolist() if not df.empty else [])
+        if edit_target:
+            p_curr = run_query("SELECT * FROM players WHERE name=?", (edit_target,))[0]
+            
+            # 현재 사진 미리보기
+            if p_curr[6] and len(str(p_curr[6])) > 10:
+                st.image(BytesIO(base64.b64decode(p_curr[6])), caption="현재 사진", width=100)
+            
+            ec1, ec2 = st.columns(2)
+            e_num = ec1.text_input("배번", value=p_curr[2])
+            e_shoe = ec2.selectbox("신발", SHOE_SIZES, index=SHOE_SIZES.index(p_curr[5]) if p_curr[5] in SHOE_SIZES else 0)
+            e_img = st.file_uploader("사진 변경 (선택)", type=['png', 'jpg', 'jpeg'], key="p_edit")
+            
+            if st.button("수정 완료"):
+                new_img = image_to_base64(e_img) if e_img else p_curr[6] # 새 사진 없으면 기존 유지
+                run_query("UPDATE players SET back_number=?, shoe_size=?, image_path=? WHERE id=?", (e_num, e_shoe, new_img, p_curr[0]), fetch=False)
+                st.rerun()
+
+# 5. 스텝 명단 (사진 업로드 추가)
 def page_staff():
     st.markdown("### 👔 스텝 명단")
     with st.expander("➕ 스텝 등록"):
@@ -379,19 +385,46 @@ def page_staff():
         s_top = c3.selectbox("상의", CLOTHES_SIZES, key="st")
         s_bot = c4.selectbox("하의", CLOTHES_SIZES, key="sb")
         s_shoe = c5.selectbox("신발", SHOE_SIZES, key="ss")
+        s_img = st.file_uploader("프로필 사진", type=['png', 'jpg', 'jpeg'])
+        
         if st.button("저장"):
-            run_query("INSERT INTO staff (name, role, top_size, bottom_size, shoe_size) VALUES (?,?,?,?,?)", (s_name, s_role, s_top, s_bot, s_shoe), fetch=False)
+            img_b64 = image_to_base64(s_img)
+            run_query("INSERT INTO staff (name, role, top_size, bottom_size, shoe_size, image_path) VALUES (?,?,?,?,?,?)", 
+                      (s_name, s_role, s_top, s_bot, s_shoe, img_b64), fetch=False)
             st.rerun()
 
-    df = get_dataframe("SELECT role as '직책', name as '이름', top_size as '상의', bottom_size as '하의', shoe_size as '신발' FROM staff ORDER BY role")
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    df = get_dataframe("SELECT id, role as '직책', name as '이름', top_size as '상의', bottom_size as '하의', shoe_size as '신발' FROM staff ORDER BY role")
+    
+    event = st.dataframe(df, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
+    if len(event.selection.rows) > 0:
+        selected_rows = df.iloc[event.selection.rows]
+        ids_to_delete = selected_rows['id'].tolist()
+        if st.button(f"🗑️ 선택한 {len(ids_to_delete)}명 삭제", type="primary"):
+            confirm_delete_dialog(ids_to_delete, "staff", st.rerun)
 
-# 6. [수정] 전체 내역 (삭제 기능 추가)
+    # 스텝 수정
+    with st.expander("🛠️ 정보 수정"):
+        edit_s_target = st.selectbox("수정 대상", df['이름'].tolist() if not df.empty else [])
+        if edit_s_target:
+            s_curr = run_query("SELECT * FROM staff WHERE name=?", (edit_s_target,))[0]
+            
+            if s_curr[6] and len(str(s_curr[6])) > 10:
+                st.image(BytesIO(base64.b64decode(s_curr[6])), caption="현재 사진", width=100)
+
+            ec1, ec2 = st.columns(2)
+            e_role = ec1.selectbox("직책", STAFF_ROLES, index=STAFF_ROLES.index(s_curr[2]) if s_curr[2] in STAFF_ROLES else 0)
+            e_name = ec2.text_input("이름", value=s_curr[1])
+            e_img = st.file_uploader("사진 변경 (선택)", type=['png', 'jpg', 'jpeg'], key="s_edit")
+            
+            if st.button("수정 완료"):
+                new_img = image_to_base64(e_img) if e_img else s_curr[6]
+                run_query("UPDATE staff SET name=?, role=?, image_path=? WHERE id=?", (e_name, e_role, new_img, s_curr[0]), fetch=False)
+                st.rerun()
+
+# 6. 전체 내역
 def page_history():
     st.markdown("### 📋 전체 내역")
-    t1, t2 = st.tabs(["📤 지급 내역 (OUT)", "📥 입고 내역 (IN)"])
-    
-    # [Tab 1] 지급 내역 삭제 기능 추가
+    t1, t2 = st.tabs(["📤 지급 내역", "📥 입고 내역"])
     with t1:
         search = st.text_input("이름 검색")
         sql = "SELECT id, date as '날짜', target_name as '이름', item_name as '품명', size as '사이즈', quantity as '수량' FROM logs WHERE 1=1"
@@ -399,29 +432,20 @@ def page_history():
         sql += " ORDER BY id DESC"
         
         df_out = get_dataframe(sql)
-        st.dataframe(df_out, use_container_width=True, hide_index=True)
-        
-        with st.expander("🗑️ 지급 내역 삭제 (주의: 재고는 복구되지 않음)"):
-            del_out_ids = st.multiselect("삭제할 기록 ID 선택", df_out['id'].tolist())
-            if st.button("지급 기록 삭제"):
-                for did in del_out_ids:
-                    run_query("DELETE FROM logs WHERE id=?", (did,), fetch=False)
-                st.success("삭제 완료")
-                st.rerun()
+        event_out = st.dataframe(df_out, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
+        if len(event_out.selection.rows) > 0:
+            ids = df_out.iloc[event_out.selection.rows]['id'].tolist()
+            if st.button(f"🗑️ 선택한 {len(ids)}개 지급 내역 삭제", type="primary"):
+                confirm_delete_dialog(ids, "logs", st.rerun)
 
-    # [Tab 2] 입고 내역 삭제 기능 유지
     with t2:
         sql_in = "SELECT id, date as '날짜', item_name as '품명', size as '사이즈', quantity as '수량' FROM inbound_logs ORDER BY id DESC"
         df_in = get_dataframe(sql_in)
-        st.dataframe(df_in, use_container_width=True, hide_index=True)
-        
-        with st.expander("🗑️ 입고 내역 삭제"):
-            del_in_ids = st.multiselect("삭제할 ID 선택", df_in['id'].tolist())
-            if st.button("입고 기록 삭제"):
-                for did in del_in_ids:
-                    run_query("DELETE FROM inbound_logs WHERE id=?", (did,), fetch=False)
-                st.success("삭제 완료")
-                st.rerun()
+        event_in = st.dataframe(df_in, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
+        if len(event_in.selection.rows) > 0:
+            ids = df_in.iloc[event_in.selection.rows]['id'].tolist()
+            if st.button(f"🗑️ 선택한 {len(ids)}개 입고 내역 삭제", type="primary"):
+                confirm_delete_dialog(ids, "inbound_logs", st.rerun)
 
 # 7. 비고
 def page_memo():
