@@ -46,38 +46,40 @@ STAFF_ROLES = ["감독", "수석코치", "코치", "트레이너", "전력분석
 CATEGORIES = ["전체보기", "하계용품", "동계용품", "연습복", "유니폼", "양말", "신발"]
 MEMO_CATS = ["팀 연혁", "드래프트", "트레이드", "입/퇴사", "부상/재활", "기타 비고"]
 
-# --- ★★★ [수정됨] 구글 스프레드시트 연결 설정 (에러 방지 강화) ★★★ ---
+# --- ★★★ [수정됨] 구글 스프레드시트 연결 설정 (안전장치 강화) ★★★ ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 @st.cache_resource
 def init_connection():
     try:
-        # 1. 내 컴퓨터(로컬)에 파일이 있는지 먼저 확인
+        # 1. 내 컴퓨터(로컬)에 파일이 있는지 먼저 확인 (가장 확실함)
         if os.path.exists('service_account.json'):
             creds = ServiceAccountCredentials.from_json_keyfile_name('service_account.json', SCOPE)
             client = gspread.authorize(creds)
             return client.open("skywalkers_db")
             
-        # 2. 파일이 없으면 Streamlit Secrets 확인 (여기가 수정됨!)
+        # 2. 파일이 없으면 Streamlit Secrets 확인
         elif "gcp_service_account" in st.secrets:
-            # Secrets 내용을 딕셔너리로 변환 (안전하게 복사)
             creds_dict = dict(st.secrets["gcp_service_account"])
             
-            # private_key가 있는지 확인하고 줄바꿈 처리
-            if "private_key" in creds_dict:
-                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            # [안전장치] 필수 키(private_key)가 있는지 검사
+            if "private_key" not in creds_dict:
+                st.error("🚨 Secrets 설정 오류: 'private_key'가 없습니다. 설정을 확인해주세요.")
+                return None
+                
+            # 줄바꿈 처리
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
             
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
             client = gspread.authorize(creds)
             return client.open("skywalkers_db")
             
         else:
-            st.error("🚨 인증 파일을 찾을 수 없습니다! (service_account.json 또는 Secrets)")
+            st.warning("⚠️ 구글 시트 연결 파일을 찾을 수 없습니다. (로컬: service_account.json 필요)")
             return None
 
     except Exception as e:
-        # 에러 메시지를 좀 더 자세히 출력 (디버깅용)
-        st.error(f"❌ 구글 시트 연결 실패: {e}")
+        st.error(f"❌ 연결 중 오류 발생: {e}")
         return None
 
 sh = init_connection()
@@ -287,7 +289,10 @@ def main():
 # 1. 물품 입고 (구글 시트)
 def page_inbound():
     st.markdown("### 📥 물품 입고 (ADD ITEMS)")
-    if not sh: st.error("구글 시트 연결 실패! service_account.json 파일을 확인하세요."); return
+    if not sh: 
+        st.warning("⚠️ service_account.json 파일이 없거나 Secrets 설정이 필요합니다.")
+        return
+    
     st.info("구글 스프레드시트에 자동 저장됩니다.")
     
     col1, col2 = st.columns(2)
@@ -325,7 +330,7 @@ def page_inbound():
 # 2. 지급 페이지 (구글 시트)
 def page_distribute():
     st.markdown("### 🎁 물품 지급 (DISTRIBUTE)")
-    if not sh: st.error("구글 시트 연결 실패!"); return
+    if not sh: return
     c1, c2 = st.columns([1, 2])
     
     with c1:
@@ -391,7 +396,7 @@ def page_distribute():
 # 3. 재고 현황 (구글 시트)
 def page_inventory():
     st.markdown("### 📦 재고 현황")
-    if not sh: st.error("구글 시트 연결 실패!"); return
+    if not sh: return
     c1, c2 = st.columns(2)
     v_cat = c1.selectbox("카테고리", CATEGORIES)
     search = c2.text_input("검색")
@@ -403,15 +408,12 @@ def page_inventory():
         if search:
             df_view = df_view[df_view['item_name'].str.contains(search)]
         
-        # [한글 컬럼명으로 변경하여 표시]
-        df_display = df_view[['id', 'category', 'item_name', 'size', 'quantity']].copy()
-        df_display.columns = ['ID', '구분', '품명', '사이즈', '잔여수량']
-        
-        event = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row", key="inv_event")
+        view_cols = ['id', 'category', 'item_name', 'size', 'quantity']
+        event = st.dataframe(df_view[view_cols], use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row", key="inv_event")
         
         if len(event.selection.rows) > 0:
             selected_indices = event.selection.rows
-            ids_to_delete = df_display.iloc[selected_indices]['ID'].tolist()
+            ids_to_delete = df_view.iloc[selected_indices]['id'].tolist()
             if st.button(f"🗑️ 선택한 {len(ids_to_delete)}개 항목 삭제", type="primary"):
                 confirm_delete_dialog(ids_to_delete, "inventory", st.rerun)
 
@@ -433,7 +435,7 @@ def page_inventory():
 # 4. 선수 명단 (구글 시트)
 def page_players():
     st.markdown("### 🏐 선수 명단")
-    if not sh: st.error("구글 시트 연결 실패!"); return
+    if not sh: return
     with st.expander("➕ 선수 등록"):
         c1, c2, c3 = st.columns(3)
         p_num = c1.text_input("배번")
@@ -461,7 +463,7 @@ def page_players():
             if st.button(f"🗑️ 선택한 {len(ids_to_delete)}명 삭제", type="primary"):
                 confirm_delete_dialog(ids_to_delete, "players", st.rerun)
 
-        # [수정] 선수 정보 수정 (상의/하의 추가 완료)
+        # [수정] 선수 정보 수정
         with st.expander("🛠️ 정보 수정"):
             edit_target = st.selectbox("수정 대상", df['name'].tolist())
             if edit_target:
@@ -477,7 +479,6 @@ def page_players():
                 e_shoe = ec3.selectbox("신발", SHOE_SIZES, index=SHOE_SIZES.index(str(p_curr['shoe_size'])) if str(p_curr['shoe_size']) in SHOE_SIZES else 0, key="eps")
                 
                 ec4, ec5 = st.columns(2)
-                # [추가됨] 상의/하의 수정
                 e_top = ec4.selectbox("상의", CLOTHES_SIZES, index=CLOTHES_SIZES.index(str(p_curr['top_size'])) if str(p_curr['top_size']) in CLOTHES_SIZES else 0, key="ept")
                 e_bot = ec5.selectbox("하의", CLOTHES_SIZES, index=CLOTHES_SIZES.index(str(p_curr['bottom_size'])) if str(p_curr['bottom_size']) in CLOTHES_SIZES else 0, key="epb")
                 
@@ -498,7 +499,7 @@ def page_players():
 # 5. 스텝 명단 (구글 시트)
 def page_staff():
     st.markdown("### 👔 스텝 명단")
-    if not sh: st.error("구글 시트 연결 실패!"); return
+    if not sh: return
     with st.expander("➕ 스텝 등록"):
         c1, c2 = st.columns(2)
         s_role = c1.selectbox("직책", STAFF_ROLES)
@@ -562,7 +563,7 @@ def page_staff():
 # 6. 전체 내역 (구글 시트)
 def page_history():
     st.markdown("### 📋 전체 내역")
-    if not sh: st.error("구글 시트 연결 실패!"); return
+    if not sh: return
     t1, t2 = st.tabs(["📤 지급 내역", "📥 입고 내역"])
     with t1:
         search = st.text_input("이름 검색")
@@ -598,7 +599,7 @@ def page_history():
 # 7. 비고
 def page_memo():
     st.markdown("### 📝 비고")
-    if not sh: st.error("구글 시트 연결 실패!"); return
+    if not sh: return
     with st.form("memo"):
         c1, c2 = st.columns([1,2])
         d = c1.date_input("날짜"); c = c2.selectbox("구분", MEMO_CATS)
