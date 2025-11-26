@@ -7,18 +7,16 @@ from io import BytesIO
 from PIL import Image
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import json
+import toml
 
-# --- 설정 ---
-CLOTHES_SIZES = ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "Free"]
-SHOE_SIZES = [str(s) for s in range(250, 325, 5)]
-STAFF_ROLES = ["감독", "수석코치", "코치", "트레이너", "전력분석", "통역", "매니저", "닥터"]
-CATEGORIES = ["전체보기", "하계용품", "동계용품", "연습복", "유니폼", "양말", "신발"]
-MEMO_CATS = ["팀 연혁", "드래프트", "트레이드", "입/퇴사", "부상/재활", "기타 비고"]
-
-# --- [긴급 처방] 다크모드 강제 고정 설정 ---
+# ---------------------------------------------------------
+# [긴급 처방] 다크모드 강제 고정 설정 생성
+# ---------------------------------------------------------
 def create_config():
     if not os.path.exists(".streamlit"):
         os.makedirs(".streamlit")
+    
     config_path = ".streamlit/config.toml"
     config_content = """
 [theme]
@@ -32,61 +30,89 @@ font="sans serif"
     try:
         with open(config_path, "w", encoding="utf-8") as f:
             f.write(config_content.strip())
-    except: pass
+    except:
+        pass
 
 create_config()
 
-# --- 구글 스프레드시트 연결 설정 (로컬/웹 자동 감지) ---
+# ---------------------------------------------------------
+# 메인 코드 시작
+# ---------------------------------------------------------
+
+# --- 설정 ---
+CLOTHES_SIZES = ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "Free"]
+SHOE_SIZES = [str(s) for s in range(250, 325, 5)]
+STAFF_ROLES = ["감독", "수석코치", "코치", "트레이너", "전력분석", "통역", "매니저", "닥터"]
+CATEGORIES = ["전체보기", "하계용품", "동계용품", "연습복", "유니폼", "양말", "신발"]
+MEMO_CATS = ["팀 연혁", "드래프트", "트레이드", "입/퇴사", "부상/재활", "기타 비고"]
+
+# --- ★★★ [수정됨] 구글 스프레드시트 연결 설정 (안전장치 강화) ★★★ ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 @st.cache_resource
 def init_connection():
     try:
-        # 1. 내 컴퓨터(로컬) 파일 확인
+        # 1. 내 컴퓨터(로컬)에 파일이 있는지 먼저 확인 (가장 확실함)
         if os.path.exists('service_account.json'):
             creds = ServiceAccountCredentials.from_json_keyfile_name('service_account.json', SCOPE)
             client = gspread.authorize(creds)
             return client.open("skywalkers_db")
-        
-        # 2. 웹(Streamlit Cloud) Secrets 확인
+            
+        # 2. 파일이 없으면 Streamlit Secrets 확인
         elif "gcp_service_account" in st.secrets:
             creds_dict = dict(st.secrets["gcp_service_account"])
-            if "private_key" in creds_dict:
-                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
+            # [안전장치] 필수 키(private_key)가 있는지 검사
+            if "private_key" not in creds_dict:
+                st.error("🚨 Secrets 설정 오류: 'private_key'가 없습니다. 설정을 확인해주세요.")
+                return None
+                
+            # 줄바꿈 처리
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
             client = gspread.authorize(creds)
             return client.open("skywalkers_db")
             
         else:
-            st.error("🚨 인증 파일을 찾을 수 없습니다! (service_account.json 또는 Secrets)")
+            st.warning("⚠️ 구글 시트 연결 파일을 찾을 수 없습니다. (로컬: service_account.json 필요)")
             return None
 
     except Exception as e:
-        st.error(f"❌ 구글 시트 연결 실패: {e}")
+        st.error(f"❌ 연결 중 오류 발생: {e}")
         return None
 
 sh = init_connection()
 
-# --- 데이터베이스 함수 ---
+# --- 데이터베이스 함수 (구글 시트용) ---
 def get_data(sheet_name):
     if sh:
         try:
             worksheet = sh.worksheet(sheet_name)
             data = worksheet.get_all_records()
             df = pd.DataFrame(data)
-            if df.empty and 'id' not in df.columns: return pd.DataFrame(columns=['id'])
+            if df.empty and 'id' not in df.columns:
+                return pd.DataFrame(columns=['id'])
             return df
-        except: return pd.DataFrame()
+        except:
+            return pd.DataFrame()
     return pd.DataFrame()
 
 def add_data(sheet_name, row_data):
     if sh:
         worksheet = sh.worksheet(sheet_name)
         try:
-            col_vals = worksheet.col_values(1)
-            last_id = int(col_vals[-1]) if len(col_vals) > 1 and str(col_vals[-1]).isdigit() else 0
-        except: last_id = 0
-        row_data.insert(0, last_id + 1)
+            col_values = worksheet.col_values(1)
+            if len(col_values) > 1:
+                last_val = col_values[-1]
+                last_id = int(last_val) if str(last_val).isdigit() else 0
+            else:
+                last_id = 0
+        except:
+            last_id = 0
+        
+        new_id = last_id + 1
+        row_data.insert(0, new_id)
         worksheet.append_row(row_data)
 
 def update_data(sheet_name, row_id, col_name, new_value):
@@ -95,9 +121,10 @@ def update_data(sheet_name, row_id, col_name, new_value):
         try:
             cell = worksheet.find(str(row_id), in_column=1)
             header = worksheet.row_values(1)
-            col_idx = header.index(col_name) + 1
-            worksheet.update_cell(cell.row, col_idx, new_value)
-        except: pass
+            col_index = header.index(col_name) + 1
+            worksheet.update_cell(cell.row, col_index, new_value)
+        except:
+            pass
 
 def delete_data(sheet_name, row_id):
     if sh:
@@ -105,29 +132,33 @@ def delete_data(sheet_name, row_id):
         try:
             cell = worksheet.find(str(row_id), in_column=1)
             worksheet.delete_rows(cell.row)
-        except: pass
+        except:
+            pass
 
-# --- 이미지 처리 ---
+# --- 이미지 처리 함수 ---
 def image_to_base64(image_file):
-    if image_file:
+    if image_file is not None:
         try:
-            img = Image.open(image_file).convert('RGB')
-            img.thumbnail((300, 300))
-            buf = BytesIO()
-            img.save(buf, format="JPEG")
-            return base64.b64encode(buf.getvalue()).decode()
-        except: return ""
+            img = Image.open(image_file)
+            img = img.convert('RGB')
+            img.thumbnail((300, 300)) 
+            buffered = BytesIO()
+            img.save(buffered, format="JPEG")
+            return base64.b64encode(buffered.getvalue()).decode()
+        except Exception as e:
+            return ""
     return ""
 
 def get_local_image_base64(image_path):
     if os.path.exists(image_path):
-        with open(image_path, "rb") as f: return base64.b64encode(f.read()).decode()
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
     return ""
 
 # --- 페이지 설정 ---
 st.set_page_config(page_title="SKYWALKERS V-EQ Manager", page_icon="🏐", layout="wide", initial_sidebar_state="expanded")
 
-# --- [디자인] 스파이더 블랙 테마 (완벽 수리) ---
+# --- [디자인] 스파이더 블랙 테마 ---
 st.markdown("""
     <style>
     /* 1. 전체 배경 */
@@ -377,12 +408,15 @@ def page_inventory():
         if search:
             df_view = df_view[df_view['item_name'].str.contains(search)]
         
-        view_cols = ['id', 'category', 'item_name', 'size', 'quantity']
-        event = st.dataframe(df_view[view_cols], use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row", key="inv_event")
+        # [한글 컬럼명으로 변경하여 표시]
+        df_display = df_view[['id', 'category', 'item_name', 'size', 'quantity']].copy()
+        df_display.columns = ['ID', '구분', '품명', '사이즈', '잔여수량']
+        
+        event = st.dataframe(df_display, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row", key="inv_event")
         
         if len(event.selection.rows) > 0:
             selected_indices = event.selection.rows
-            ids_to_delete = df_view.iloc[selected_indices]['id'].tolist()
+            ids_to_delete = df_display.iloc[selected_indices]['ID'].tolist()
             if st.button(f"🗑️ 선택한 {len(ids_to_delete)}개 항목 삭제", type="primary"):
                 confirm_delete_dialog(ids_to_delete, "inventory", st.rerun)
 
@@ -432,7 +466,7 @@ def page_players():
             if st.button(f"🗑️ 선택한 {len(ids_to_delete)}명 삭제", type="primary"):
                 confirm_delete_dialog(ids_to_delete, "players", st.rerun)
 
-        # [수정] 선수 정보 수정
+        # [수정] 선수 정보 수정 (상의/하의 추가 완료)
         with st.expander("🛠️ 정보 수정"):
             edit_target = st.selectbox("수정 대상", df['name'].tolist())
             if edit_target:
@@ -448,6 +482,7 @@ def page_players():
                 e_shoe = ec3.selectbox("신발", SHOE_SIZES, index=SHOE_SIZES.index(str(p_curr['shoe_size'])) if str(p_curr['shoe_size']) in SHOE_SIZES else 0, key="eps")
                 
                 ec4, ec5 = st.columns(2)
+                # [추가됨] 상의/하의 수정
                 e_top = ec4.selectbox("상의", CLOTHES_SIZES, index=CLOTHES_SIZES.index(str(p_curr['top_size'])) if str(p_curr['top_size']) in CLOTHES_SIZES else 0, key="ept")
                 e_bot = ec5.selectbox("하의", CLOTHES_SIZES, index=CLOTHES_SIZES.index(str(p_curr['bottom_size'])) if str(p_curr['bottom_size']) in CLOTHES_SIZES else 0, key="epb")
                 
